@@ -55,6 +55,8 @@ from xml.etree import ElementTree as ET
 from scipy.ndimage import affine_transform
 from concurrent.futures import ProcessPoolExecutor
 from scipy.fft import fft2, ifft2, fftshift, ifftshift
+
+import operator
 try:
     import cupy as cp
     import cupyx.scipy.ndimage as cupy_ndimage
@@ -155,8 +157,8 @@ def parse_structure_input(structure_input):
     """
     Parses the structure input argument into a list of structure sets.
 
-    Each structure set can contain one or more structures, and each structure set will be applied 
-    to generate a corresponding set of micrographs. The input can handle both single-structure-per-micrograph 
+    Each structure set can contain one or more structures, and each structure set will be applied
+    to generate a corresponding set of micrographs. The input can handle both single-structure-per-micrograph
     and multiple-structures-per-micrograph formats in the forms:
 
     1. Single structures per micrograph. Example: ['1TIM', 'mystructure.mrc', 'rp']
@@ -510,6 +512,8 @@ def parse_arguments(script_start_time):
 
     # Determine if GPU should be used
     args.use_gpu = not args.use_cpu and gpu_available
+    print_and_log("gpu",args.use_cpu)
+    print_and_log("cpu",args.use_gpu)
 
     # Set the appropriate ndimage and fftpack libraries based on user choice
     global ndimage, fftpack
@@ -1208,7 +1212,7 @@ def normalize_and_convert_mrc(input_file):
 
 def threshold_mrc_file(input_file_path, std_devs_above_mean):
     """
-    Thresholds an MRC file so that all voxel values below a specified number of 
+    Thresholds an MRC file so that all voxel values below a specified number of
     standard deviations above the mean are set to zero.
 
     :param str input_file_path: Path to the input MRC file.
@@ -1245,7 +1249,7 @@ def scale_mrc_file(input_mrc_path, pixelsize):
     scale_factor = original_voxel_size / pixelsize
 
     # Calculate the new dimensions and round down to the next integer that is evenly divisible by 2 for future FFT processing
-    scaled_dimension_x = int(((original_shape[0] * scale_factor) // 2) * 2) 
+    scaled_dimension_x = int(((original_shape[0] * scale_factor) // 2) * 2)
     scaled_dimension_y = int(((original_shape[1] * scale_factor) // 2) * 2)
     scaled_dimension_z = int(((original_shape[2] * scale_factor) // 2) * 2)
 
@@ -1365,7 +1369,8 @@ def write_mrc(mrc_path, numpy_array, pixelsize=1.0):
         raise ValueError("Input array must be 2D or 3D")
 
     with mrcfile.new(mrc_path, overwrite=True) as mrc:
-        mrc.set_data(numpy_array)
+        half_numpy_array = numpy_array.astype(np.float16)
+        mrc.set_data(half_numpy_array)
         mrc.voxel_size = (pixelsize, pixelsize, pixelsize)
         mrc.update_header_from_data()
         mrc.update_header_stats()
@@ -1554,7 +1559,7 @@ def write_coord_file(coordinates, output_file):
         for x, y in coordinates:
             f.write(f"{x} {y}\n")  # Writing each coordinate as a new line in the .coord file
 
-def save_particle_coordinates(structure_name, particle_locations_with_orientations, output_path, 
+def save_particle_coordinates(structure_name, particle_locations_with_orientations, output_path,
                               micrograph_output_path, imod_coordinate_file, coord_coordinate_file,
                               defocus, imod_circle_radius, imod_circle_thickness, imod_circle_color):
     """
@@ -1826,7 +1831,7 @@ def get_gpu_utilization(gpu_id):
     return {'free_mem': free_mem, 'core_usage': core_usage}
 
 def fourier_crop_gpu(image, downsample_factor):
-    """	
+    """
     Fourier crops a 2D image using GPU.
 
     :param cupy.ndarray image: Input 2D image to be Fourier cropped.
@@ -1869,7 +1874,7 @@ def fourier_crop_gpu(image, downsample_factor):
     return cp.asnumpy(cp.real(image_cropped))
 
 def fourier_crop(image, downsample_factor):
-    """	
+    """
     Fourier crops a 2D image using CPU.
 
     :param numpy.ndarray image: Input 2D image to be Fourier cropped.
@@ -2525,8 +2530,10 @@ def generate_projection(angle, volume_data):
     rotation_matrix = euler_to_matrix(alpha, beta, gamma)
 
     # Trim the volume to the smallest possible cube containing non-zero voxels
-    trimmed_volume = trim_volume(volume_data)
+    # trimmed_volume = trim_volume(volume_data)
+    trimmed_volume = volume_data
 
+    print_and_log(volume.shape)
     # Center of the trimmed volume
     center = np.array(trimmed_volume.shape) / 2
 
@@ -2535,11 +2542,13 @@ def generate_projection(angle, volume_data):
 
     # Project the rotated volume by summing along the z-axis
     projection = np.sum(rotated_volume, axis=2)
+    print_and_log(projection.shape)
 
     # Pad the projection back to the original shape
     original_shape = volume_data.shape[:2]
     padded_projection = pad_projection(projection, original_shape)
 
+    print_and_log(padded_projection.shape)
     return padded_projection
 
 def generate_projections(structure, num_projections, orientation_mode, preferred_angles, angle_variation, preferred_weight, num_cores, use_gpu, gpu_ids):
@@ -2577,7 +2586,9 @@ def generate_projections(structure, num_projections, orientation_mode, preferred
 
     if use_gpu:
         # Trim the volume to the smallest possible cube containing non-zero voxels
-        trimmed_volume = trim_volume(structure)
+        # Not trim
+        # trimmed_volume = trim_volume(structure)
+        trimmed_volume = structure
 
         # Determine the maximum batch size based on available GPU memory for each GPU
         slice_size = trimmed_volume.nbytes
@@ -2616,8 +2627,8 @@ def generate_projections(structure, num_projections, orientation_mode, preferred
 
     return np.array(projections), orientations
 
-def generate_particle_locations(micrograph_image, image_size, num_particles_per_structure, half_small_image_widths, 
-                                border_distance, no_edge_particles, dist_type, non_random_dist_type, 
+def generate_particle_locations(micrograph_image, image_size, num_particles_per_structure, half_small_image_widths,
+                                border_distance, no_edge_particles, dist_type, non_random_dist_type,
                                 aggregation_amount, allow_overlap):
     """
     Generate random/non-random locations for particles from multiple structures within an image,
@@ -3207,7 +3218,7 @@ def create_collage(large_image, small_images, particle_locations, gaussian_varia
 
     return collage
 
-def blend_images(input_options, particle_and_micrograph_generation_options, simulation_options, 
+def blend_images(input_options, particle_and_micrograph_generation_options, simulation_options,
                  junk_labels_options, output_options, context, defocus):
     """
     Blend small images (particles) from multiple structures into a large image (micrograph).
@@ -3281,9 +3292,9 @@ def blend_images(input_options, particle_and_micrograph_generation_options, simu
                 bottom_edge = y + reduced_sidelength
 
                 # Determine if the particle is too close to any edge of the large image
-                if (left_edge < particle_and_micrograph_generation_options['border_distance'] or 
+                if (left_edge < particle_and_micrograph_generation_options['border_distance'] or
                     right_edge > large_image.shape[1] - particle_and_micrograph_generation_options['border_distance'] or
-                    top_edge < particle_and_micrograph_generation_options['border_distance'] or 
+                    top_edge < particle_and_micrograph_generation_options['border_distance'] or
                     bottom_edge > large_image.shape[0] - particle_and_micrograph_generation_options['border_distance']):
                     remaining_particle_locations.remove((x, y))
 
@@ -3320,7 +3331,7 @@ def blend_images(input_options, particle_and_micrograph_generation_options, simu
 
     # Step 6: Create the collage of particles on the micrograph for all structures
     for i in range(len(all_small_images)):
-        collage = create_collage(large_image, all_small_images[i], all_particle_locations[i], 
+        collage = create_collage(large_image, all_small_images[i], all_particle_locations[i],
                                  particle_and_micrograph_generation_options['gaussian_variance'])
 
         # If a probability map is provided, adjust the collage based on local ice thickness
@@ -3355,7 +3366,7 @@ def blend_images(input_options, particle_and_micrograph_generation_options, simu
 
     return blended_image, filtered_particle_locations_with_orientations, num_particles_saved_per_structure
 
-def add_images(input_options, particle_and_micrograph_generation_options, simulation_options, 
+def add_images(input_options, particle_and_micrograph_generation_options, simulation_options,
                junk_labels_options, output_options, context, defocus):
     """
     Add small images or particles to a large image and save the resulting micrograph.
@@ -3629,8 +3640,54 @@ def crop_particles_from_micrographs(structure_name, structure_set_name, box_size
 
     return total_cropped
 
-def process_single_micrograph(args, structures, line, total_structures, structure_index,
-                              micrograph_usage_count, remaining_aggregation_amounts, micrograph_number, structure_set_name):
+def prepare_single_micrograph(args, structures):
+    """
+    Prepare projections and noisy projections for structures
+    """
+    #assert len(structures)==1
+    #structure = structures[0]
+    print_and_log("Preparing projections and noisy for structures")
+    num_particles_per_structure = 2048
+    all_structure_particles = []
+    all_structure_particles_orientations = []
+    all_structure_particles_noisy = []
+    for idx, (structure_name, structure, mass, ice_scaling_fudge_factor) in enumerate(structures):
+        particles, orientations = generate_projections(
+            structure,
+            num_particles_per_structure,
+            args.orientation_mode,
+            args.preferred_angles,
+            args.angle_variation,
+            args.preferred_weight,
+            args.cpus,
+            args.use_gpu,
+            #args.gpu_ids
+            [0]
+        )
+        print_and_log(f" Simulating pixel-level Poisson noise{f' and dose damage' if args.dose_damage != 'None' else ''} across {args.num_simulated_particle_frames} particle frame{'s' if args.num_simulated_particle_frames != 1 else ''} for {structure_name}...")
+        args.use_gpu=0
+        if args.use_gpu == 0:
+            noisy_particles = add_poisson_noise_gpu(particles,
+                                                    args.num_simulated_particle_frames,
+                                                    args.dose_a,
+                                                    args.dose_b,
+                                                    args.dose_c,
+                                                    args.apix,
+                                                    #args.gpu_ids
+                                                    [0])
+        else:
+            noisy_particles = add_poisson_noise(particles, args.num_simulated_particle_frames, args.dose_a, args.dose_b,
+                                                args.dose_c, args.apix, args.cpus)
+
+        all_structure_particles.append(particles)
+        all_structure_particles_orientations.append(orientations)
+        all_structure_particles_noisy.append(noisy_particles)
+
+    print_and_log("Projections and noisy for structures have been prepared!")
+    return all_structure_particles, all_structure_particles_orientations, all_structure_particles_noisy
+
+def process_single_micrograph_with_projections(args, structures, line, total_structures, structure_index,
+                                               micrograph_usage_count, remaining_aggregation_amounts, micrograph_number, structure_set_name, projected_particles, projected_orientations, projected_noisy):
     """
     Process a single micrograph for a set of structures.
 
@@ -3716,6 +3773,223 @@ def process_single_micrograph(args, structures, line, total_structures, structur
         aggregation_amount=aggregation_amount_val,
         allow_overlap=args.allow_overlap
     )
+    # Skip  projection in Step3, get projections directly
+    # Step 3: Loop over each structure again to generate projections, add noise, and apply CTF
+    for idx, (structure_name, structure, mass, ice_scaling_fudge_factor) in enumerate(structures):
+        print_and_log(f"{context} Skip Projecting the structure volume ({structure_name}) {num_particles_per_structure[idx]} times...")
+        projections_idx = np.random.choice(len(projected_orientations[idx]), size=num_particles_per_structure[idx], replace=True)
+        getter = operator.itemgetter(*projections_idx)
+        orientations = getter(projected_orientations[idx])
+        #orientations = np.take(projected_orientations[idx], projections_idx)
+
+
+        # # Generate projections with the specified orientation mode for the current structure
+        # particles, orientations = generate_projections(
+        #     structure,
+        #     num_particles_per_structure[idx],
+        #     args.orientation_mode,
+        #     args.preferred_angles,
+        #     args.angle_variation,
+        #     args.preferred_weight,
+        #     args.cpus,
+        #     args.use_gpu,
+        #     #args.gpu_ids
+        #     [0]
+        # )
+
+        # Store projections, orientations, and particle locations for this structure
+        all_orientations.append(orientations)
+        all_particle_locations.append(particle_locations[idx])  # Keep particle locations separated for each structure
+
+        # Skip add_poisson_noise to generate noisy_particles in Step 4
+        # Step 4: Simulate noise, damage, and apply CTF to this structure's particles
+        print_and_log(f"{context} Skip Simulating pixel-level Poisson noise{f' and dose damage' if args.dose_damage != 'None' else ''} across {args.num_simulated_particle_frames} particle frame{'s' if args.num_simulated_particle_frames != 1 else ''} for {structure_name}...")
+        #noisy_particles = np.take(projected_noisy[idx], projections_idx)
+        noisy_particles = getter(projected_noisy[idx])
+        #if args.use_gpu == 0:
+        #    noisy_particles = add_poisson_noise_gpu(particles,
+        #                                            args.num_simulated_particle_frames,
+        #                                            args.dose_a,
+        #                                            args.dose_b,
+        #                                            args.dose_c,
+        #                                            args.apix,
+        #                                            #args.gpu_ids
+        #                                            [0])
+        #else:
+        #    noisy_particles = add_poisson_noise(particles, args.num_simulated_particle_frames, args.dose_a, args.dose_b,
+        #                                        args.dose_c, args.apix, args.cpus)
+
+        # Apply CTF to the noisy particles
+        print_and_log(f"{context} Applying CTF to {structure_name} based on defocus ({float(defocus):.4f} microns) and microscope parameters ({args.voltage} keV, AmpCont: {args.ampcont}%, Cs: {args.Cs} mm, Pixelsize: {args.apix} Angstroms) of the ice micrograph...")
+        noisy_particles_CTF = apply_ctfs_with_eman2(noisy_particles, [defocus] * len(noisy_particles), args.ampcont, args.bfactor,
+                                                    args.apix, args.Cs, args.voltage, args.cpus)
+
+        # Store the noisy particles for this structure
+        all_particles.append(noisy_particles_CTF)
+
+    structure_results = []
+
+    # Step 5: Blend all particles into the micrograph and save coordinates
+    print_and_log(f"{context} Adding {len(all_particles) * num_particles} particles to the micrograph{f' {dist_type}ly ({non_random_dist_type})' if dist_type == 'non_random' else f' {dist_type}ly' if dist_type else ''}{f' with aggregation amount of {aggregation_amount_val:.1f}' if args.distribution in ('m','micrograph') else ''} while adding Gaussian (white) noise and simulating a average relative ice thickness of {ice_thickness_printout:.1f} nm...")
+    input_options = {
+        'large_image_path': f"{args.image_directory}/{fname}.mrc",
+        'large_image': micrograph,
+        'small_images': all_particles,  # Pass the processed noisy particles for all structures
+        'pixelsize': args.apix,
+        'structure_names': [structure[0] for structure in structures],  # Names of the structures
+        'orientations': all_orientations,
+        'particle_locations': all_particle_locations,
+        'half_small_image_widths': half_small_image_widths
+    }
+    particle_and_micrograph_generation_options = {
+        'scale_percent': args.scale_percent,
+        'dist_type': dist_type,
+        'non_random_dist_type': non_random_dist_type,
+        'border_distance': args.border,
+        'no_edge_particles': args.no_edge_particles,
+        'save_edge_coordinates': args.save_edge_coordinates,
+        'gaussian_variance': gaussian_variance,
+        'aggregation_amount': aggregation_amount_val,
+        'allow_overlap': args.allow_overlap,
+        'save_overlapping_coords': args.save_overlapping_coords,
+        'allowed_overlap': args.allowed_overlap
+    }
+    simulation_options = {'scale': ice_thickness}
+    junk_labels_options = {
+        'no_junk_filter': args.no_junk_filter,
+        'flip_x': args.flip_x,
+        'flip_y': args.flip_y,
+        'json_scale': args.json_scale,
+        'polygon_expansion_distance': args.polygon_expansion_distance
+    }
+
+    # Use the structure_set_name for output paths to ensure consistency with generate_micrographs
+    output_options = {
+        'save_as_mrc': args.mrc,
+        'save_as_png': args.png,
+        'save_as_jpeg': args.jpeg,
+        'jpeg_quality': args.jpeg_quality,
+        'imod_coordinate_file': args.imod_coordinate_file,
+        'coord_coordinate_file': args.coord_coordinate_file,
+        'output_paths': [f"{structure_set_name}/{fname}_{structure[0]}{repeat_suffix}" for structure in structures],
+        'imod_circle_radius': args.imod_circle_radius,
+        'imod_circle_thickness': args.imod_circle_thickness,
+        'imod_circle_color': [convert_color_to_rgb('random') if args.imod_circle_color == 'random' else convert_color_to_rgb(args.imod_circle_color[i] if isinstance(args.imod_circle_color, list) and len(args.imod_circle_color) == len(structures) else args.imod_circle_color) for i, _ in enumerate(structures)]
+    }
+
+    num_particles_projected, num_particles_saved_per_structure = add_images(
+        input_options, particle_and_micrograph_generation_options,
+        simulation_options, junk_labels_options, output_options, context, defocus
+    )
+
+    # Distribute the particles among the structures
+    num_structures = len(structures)
+    particles_per_structure = num_particles_projected // num_structures
+
+    structure_results = []
+    for idx, structure in enumerate(structures):
+        structure_name = structure[0]
+        # Assign any remaining particles to the last structure
+        if idx == num_structures - 1:
+            structure_projected = num_particles_projected - (particles_per_structure * (num_structures - 1))
+        else:
+            structure_projected = particles_per_structure
+        # Use the actual number of saved particles for this structure from `num_particles_saved_per_structure`
+        structure_saved = num_particles_saved_per_structure[idx]
+        structure_results.append((structure_name, structure_projected, structure_saved))
+
+    return structure_results
+
+
+
+def process_single_micrograph(args, structures, line, total_structures, structure_index,
+                              micrograph_usage_count, remaining_aggregation_amounts, micrograph_number, structure_set_name):
+    """
+    Process a single micrograph for a set of structures.
+
+    :param Namespace args: The argument namespace containing all the user-specified command-line arguments.
+    :param list structures: List of tuples, each containing (structure_name, structure, mass, ice_scaling_fudge_factor).
+    :param str line: The line containing the micrograph name and defocus value.
+    :param int total_structures: Total number of structure sets requested.
+    :param int structure_index: Index of the current structure set.
+    :param dict micrograph_usage_count: Dictionary to keep track of the usage count of each unique micrograph.
+    :param list remaining_aggregation_amounts: List to track remaining aggregation amounts.
+    :param int micrograph_number: Current micrograph number (1-indexed).
+    :param str structure_set_name: The name of the directory for this structure set.
+    :return tuple: Number of particles projected, number of particles with saved coordinates.
+    """
+    print_and_log("", logging.DEBUG)
+
+    # Reseed the random number generators per process to ensure unique random numbers
+    seed = int.from_bytes(os.urandom(4), byteorder="little")
+    np.random.seed(seed)
+    random.seed(seed)
+
+    # Parse the 'micrograph_name.mrc defocus' line
+    fname, defocus = line.strip().split()[:2]
+    fname = os.path.splitext(os.path.basename(fname))[0]
+    micrograph = read_mrc(f"{args.image_directory}/{fname}.mrc")
+    mean, gaussian_variance = estimate_noise_parameters(micrograph)
+
+    # Track each micrograph's usage count for naming purposes
+    micrograph_usage_count[fname] = micrograph_usage_count.get(fname, 0) + 1
+    # Generate the repeat number suffix for the filename
+    repeat_suffix = f"_{micrograph_usage_count[fname]}" if micrograph_usage_count[fname] > 1 else ""
+
+    # Add context for printout
+    context = f"[SS #{structure_index + 1} | {micrograph_number}/{args.num_images}]"
+    num_hyphens = '-' * (57 + len(f"{structure_index + 1}{total_structures}{fname}"))
+    print_and_log(f"\n\033[1m{num_hyphens}\033[0m", logging.WARNING)
+    print_and_log(f"Generating synthetic micrograph #{micrograph_number} for SS #{structure_index + 1} ({structure_index + 1}/{total_structures}) from {fname}...", logging.WARNING)
+    print_and_log(f"\033[1m{num_hyphens}\033[0m\n", logging.WARNING)
+
+    # Determine if overlap is allowed for this micrograph
+    if args.allow_overlap_random:
+        args.allow_overlap = bool(random.getrandbits(1))
+    print_and_log(f"{context} {'Allowing' if args.allow_overlap else 'Not allowing'} overlapping particles for this micrograph.")
+
+    # Initialize aggregation amounts for this micrograph
+    remaining_aggregation_amounts = list(remaining_aggregation_amounts)
+
+    # Initialize totals for this micrograph
+    total_num_particles_projected = 0
+    total_num_particles_with_saved_coordinates = 0
+
+    # Initialize lists to store combined particles, locations, and orientations for all structures
+    all_particle_locations = []
+    all_orientations = []
+    all_particles = []  # Will hold the processed particle stacks for each structure
+    half_small_image_widths = []
+    num_particles_per_structure = []
+
+    # Step 1: Loop over each structure to determine maximum number of particles and other relevant parameters
+    for structure_name, structure, mass, ice_scaling_fudge_factor in structures:
+        # Determine ice and particle behavior parameters for each structure
+        ice_thickness, ice_thickness_printout, num_particles, dist_type, non_random_dist_type, aggregation_amount_val = determine_ice_and_particle_behavior(
+            args, structure, structure_name, micrograph, ice_scaling_fudge_factor, remaining_aggregation_amounts, context
+        )
+        num_particles = num_particles // len(structures)  # Evenly divide the total number of particles amongst the structures in the set
+        print_and_log(f"{context} {num_particles} particles of {structure_name} will be added to the micrograph")
+
+        # Store the number of particles for this structure
+        #num_particles_per_structure.append(num_particles)
+        num_particles_per_structure.append(32)
+        # Store half the width of the small image for each structure (used in generating locations)
+        half_small_image_widths.append(structure.shape[0] // 2)
+
+    # Step 2: Generate particle locations for all structures using round-robin placement
+    particle_locations, prob_map = generate_particle_locations(
+        micrograph_image=micrograph,
+        image_size=micrograph.shape,
+        num_particles_per_structure=num_particles_per_structure,
+        half_small_image_widths=half_small_image_widths,
+        border_distance=args.border,
+        no_edge_particles=args.no_edge_particles,
+        dist_type=dist_type,
+        non_random_dist_type=non_random_dist_type,
+        aggregation_amount=aggregation_amount_val,
+        allow_overlap=args.allow_overlap
+    )
 
     # Step 3: Loop over each structure again to generate projections, add noise, and apply CTF
     for idx, (structure_name, structure, mass, ice_scaling_fudge_factor) in enumerate(structures):
@@ -3723,26 +3997,32 @@ def process_single_micrograph(args, structures, line, total_structures, structur
 
         # Generate projections with the specified orientation mode for the current structure
         particles, orientations = generate_projections(
-            structure, 
-            num_particles_per_structure[idx], 
-            args.orientation_mode, 
+            structure,
+            num_particles_per_structure[idx],
+            args.orientation_mode,
             args.preferred_angles,
-            args.angle_variation, 
-            args.preferred_weight, 
-            args.cpus, 
-            args.use_gpu, 
-            args.gpu_ids
+            args.angle_variation,
+            args.preferred_weight,
+            args.cpus,
+            args.use_gpu,
+            #args.gpu_ids
+            [0]
         )
-
         # Store projections, orientations, and particle locations for this structure
         all_orientations.append(orientations)
         all_particle_locations.append(particle_locations[idx])  # Keep particle locations separated for each structure
 
         # Step 4: Simulate noise, damage, and apply CTF to this structure's particles
         print_and_log(f"{context} Simulating pixel-level Poisson noise{f' and dose damage' if args.dose_damage != 'None' else ''} across {args.num_simulated_particle_frames} particle frame{'s' if args.num_simulated_particle_frames != 1 else ''} for {structure_name}...")
-        if args.use_gpu:
-            noisy_particles = add_poisson_noise_gpu(particles, args.num_simulated_particle_frames, args.dose_a, args.dose_b,
-                                                    args.dose_c, args.apix, args.gpu_ids)
+        if args.use_gpu == 0:
+            noisy_particles = add_poisson_noise_gpu(particles,
+                                                    args.num_simulated_particle_frames,
+                                                    args.dose_a,
+                                                    args.dose_b,
+                                                    args.dose_c,
+                                                    args.apix,
+                                                    #args.gpu_ids
+                                                    [0])
         else:
             noisy_particles = add_poisson_noise(particles, args.num_simulated_particle_frames, args.dose_a, args.dose_b,
                                                 args.dose_c, args.apix, args.cpus)
@@ -3940,6 +4220,8 @@ def generate_micrographs(args, structure_set, structure_set_index, total_structu
     structure_particles_projected = {structure[0]: 0 for structure in structures}
     structure_particles_saved = {structure[0]: 0 for structure in structures}
 
+    # Added by Jiaqiang Qian, generated particles and projections before
+    projected_particles, projected_orientations, projected_noisy = prepare_single_micrograph(args, structures)
     # Main loop for generating micrographs
     if args.parallelize_micrographs > 1:
         # Parallel micrograph generation using ProcessPoolExecutor
@@ -3948,11 +4230,17 @@ def generate_micrographs(args, structure_set, structure_set_index, total_structu
             for i, line in enumerate(selected_images):
                 micrograph_number = i + 1  # Micrograph number (1-indexed)
                 # Submit each micrograph generation task
+                #future = executor.submit(
+                #    process_single_micrograph, args, structures, line, total_structure_sets,
+                #    structure_set_index, micrograph_usage_count, remaining_aggregation_amounts,
+                #    micrograph_number, structure_set_name
+                #)
                 future = executor.submit(
-                    process_single_micrograph, args, structures, line, total_structure_sets,
-                    structure_set_index, micrograph_usage_count, remaining_aggregation_amounts, 
-                    micrograph_number, structure_set_name
+                    process_single_micrograph_with_projections, args, structures, line, total_structure_sets,
+                    structure_set_index, micrograph_usage_count, remaining_aggregation_amounts,
+                    micrograph_number, structure_set_name, projected_particles, projected_orientations, projected_noisy
                 )
+
                 futures.append(future)
 
             # Collect results from parallel tasks
@@ -3966,11 +4254,17 @@ def generate_micrographs(args, structure_set, structure_set_index, total_structu
         # Sequential micrograph generation
         for i, line in enumerate(selected_images):
             micrograph_number = i + 1  # Micrograph number (1-indexed)
-            results = process_single_micrograph(
-                args, structures, line, total_structure_sets, structure_set_index, 
-                micrograph_usage_count, remaining_aggregation_amounts, micrograph_number, 
-                structure_set_name
+            #results = process_single_micrograph(
+            #    args, structures, line, total_structure_sets, structure_set_index,
+            #    micrograph_usage_count, remaining_aggregation_amounts, micrograph_number,
+            #    structure_set_name
+            #)
+            results = process_single_micrograph_with_projections(
+                args, structures, line, total_structure_sets, structure_set_index,
+                micrograph_usage_count, remaining_aggregation_amounts, micrograph_number,
+                structure_set_name, projected_particles, projected_orientations, projected_noisy
             )
+
             for structure_name, projected, saved in results:
                 structure_particles_projected[structure_name] += projected
                 structure_particles_saved[structure_name] += saved
