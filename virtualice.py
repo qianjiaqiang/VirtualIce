@@ -4698,6 +4698,9 @@ def blend_images(
                         expand=True,
                     )
                 )
+                if carbon_polygons:
+                    print(f"{json_file_path} has carbon!")
+
                 filtered_particle_locations = filter_coordinates_outside_polygons(
                     particle_locations, json_scale, polygons
                 )
@@ -4705,6 +4708,9 @@ def blend_images(
                 filtered_carbon_particle_locations = filter_coordinates_inside_polygons(
                     particle_locations, json_scale, carbon_polygons
                 )
+
+                if filtered_carbon_particle_locations:
+                    print("filtered_carbon_particle_locations:",filtered_carbon_particle_locations)
 
                 filtered_all_carbon_particle_locations.append(
                     filtered_carbon_particle_locations
@@ -4757,36 +4763,36 @@ def blend_images(
                             )
                         )
                     )
-                _left_edge = _x - _reduced_sidelength
-                _right_edge = _x + _reduced_sidelength
-                _top_edge = _y - _reduced_sidelength
-                _bottom_edge = _y + _reduced_sidelength
+                    _left_edge = _x - _reduced_sidelength
+                    _right_edge = _x + _reduced_sidelength
+                    _top_edge = _y - _reduced_sidelength
+                    _bottom_edge = _y + _reduced_sidelength
 
-                # Determine if the particle is too close to any edge of the large image
-                if (
-                    _left_edge
-                    < particle_and_micrograph_generation_options["border_distance"]
-                    or _right_edge
-                    > large_image.shape[1]
-                    - particle_and_micrograph_generation_options["border_distance"]
-                    or _top_edge
-                    < particle_and_micrograph_generation_options["border_distance"]
-                    or _bottom_edge
-                    > large_image.shape[0]
-                    - particle_and_micrograph_generation_options["border_distance"]
-                ):
-                    _remained.remove((_x, _y))
+                    # Determine if the particle is too close to any edge of the large image
+                    if (
+                        _left_edge
+                        < particle_and_micrograph_generation_options["border_distance"]
+                        or _right_edge
+                        > large_image.shape[1]
+                        - particle_and_micrograph_generation_options["border_distance"]
+                        or _top_edge
+                        < particle_and_micrograph_generation_options["border_distance"]
+                        or _bottom_edge
+                        > large_image.shape[0]
+                        - particle_and_micrograph_generation_options["border_distance"]
+                    ):
+                        _remained.remove((_x, _y))
 
-            num_particles_removed = len(_before_filtered) - len(_remained)
-            if num_particles_removed > 0:
-                print_and_log(
-                    f"{context} {num_particles_removed} edge particle{'' if num_particles_removed == 1 else 's'} removed for {structure_name}."
-                )
-            else:
-                print_and_log(
-                    f"{context} 0 edge particles removed for {structure_name}."
-                )
-        _filtered.append(_remained)
+                num_particles_removed = len(_before_filtered) - len(_remained)
+                if num_particles_removed > 0:
+                    print_and_log(
+                        f"{context} {num_particles_removed} edge particle{'' if num_particles_removed == 1 else 's'} removed for {structure_name}."
+                    )
+                else:
+                    print_and_log(
+                        f"{context} 0 edge particles removed for {structure_name}."
+                    )
+            _filtered.append(_remained)
 
         return _filtered
 
@@ -4798,8 +4804,8 @@ def blend_images(
         final_carbon_particle_locations = edge_particle_filtering(
             filtered_all_carbon_particle_locations
         )
-
-    #for i, filtered_particle_locations in enumerate(filtered_all_particle_locations):
+        print("final_carbon_particle_locations:",final_carbon_particle_locations)
+    # for i, filtered_particle_locations in enumerate(filtered_all_particle_locations):
     #    remaining_particle_locations = filtered_particle_locations[:]
     #    structure_name = structure_names[i]
     #    half_small_image_width = input_options["half_small_image_widths"][
@@ -4827,16 +4833,16 @@ def blend_images(
 
     #            # Determine if the particle is too close to any edge of the large image
     #            if (
-    #                left_edge
-    #                < particle_and_micrograph_generation_options["border_distance"]
-    #                or right_edge
-    #                > large_image.shape[1]
-    #                - particle_and_micrograph_generation_options["border_distance"]
-    #                or top_edge
-    #                < particle_and_micrograph_generation_options["border_distance"]
-    #                or bottom_edge
-    #                > large_image.shape[0]
-    #                - particle_and_micrograph_generation_options["border_distance"]
+    #                    left_edge
+    #                    < particle_and_micrograph_generation_options["border_distance"]
+    #                    or right_edge
+    #                    > large_image.shape[1]
+    #                    - particle_and_micrograph_generation_options["border_distance"]
+    #                    or top_edge
+    #                    < particle_and_micrograph_generation_options["border_distance"]
+    #                    or bottom_edge
+    #                    > large_image.shape[0]
+    #                    - particle_and_micrograph_generation_options["border_distance"]
     #            ):
     #                remaining_particle_locations.remove((x, y))
 
@@ -4852,7 +4858,6 @@ def blend_images(
     #                f"{context} 0 edge particles removed for {structure_name}."
     #            )
     #    final_particle_locations.append(remaining_particle_locations)
-
 
     def overlapping_particle_filtering(_before_filtered):
         _filtered = []
@@ -4884,12 +4889,16 @@ def blend_images(
 
     # Step 3: Overlapping Particle Filtering (for Coordinate Files)
     final_filtered_particle_locations = []
-    final_filtered_particle_locations = overlapping_particle_filtering(final_particle_locations)
+    final_filtered_particle_locations = overlapping_particle_filtering(
+        final_particle_locations
+    )
     final_filtered_carbon_particle_locations = []
     if carbon:
-        final_filtered_carbon_particle_locations = overlapping_particle_filtering(final_carbon_particle_locations)
-
-    #for i, particle_locations in enumerate(final_particle_locations):
+        final_filtered_carbon_particle_locations = overlapping_particle_filtering(
+            final_carbon_particle_locations
+        )
+        print("final_filtered_carbon_particle_locations:", final_filtered_carbon_particle_locations)
+    # for i, particle_locations in enumerate(final_particle_locations):
     #    if not particle_and_micrograph_generation_options["save_overlapping_coords"]:
     #        half_small_image_width = input_options["half_small_image_widths"][i]
     #        filtered_particle_locations = filter_out_overlapping_particles(
@@ -4948,11 +4957,12 @@ def blend_images(
         for loc, ori in zip(final_filtered_particle_locations[i], all_orientations[i]):
             filtered_particle_locations_with_orientations.append((loc, ori))
 
-
     filtered_carbon_particle_locations_with_orientations = []
     if carbon:
         for i, structure_name in enumerate(structure_names):
-            for loc, ori in zip(final_filtered_carbon_particle_locations[i], all_orientations[i]):
+            for loc, ori in zip(
+                final_filtered_carbon_particle_locations[i], all_orientations[i]
+            ):
                 filtered_carbon_particle_locations_with_orientations.append((loc, ori))
 
     # Initialize a list to store the number of saved coordinates for each structure
@@ -4982,6 +4992,31 @@ def blend_images(
         num_particles_saved_per_structure.append(
             len(structure_particle_locations_with_orientations)
         )
+
+    if carbon:
+        for i, structure_name in enumerate(structure_names):
+            structure_particle_locations_with_orientations = [
+                (loc, ori)
+                for loc, ori in zip(
+                    final_filtered_carbon_particle_locations[i], all_orientations[i]
+                )
+            ]
+            save_particle_coordinates(
+                structure_name + "_carbon",
+                structure_particle_locations_with_orientations,
+                output_paths[i],
+                output_options["output_file_path"],
+                output_options["imod_coordinate_file"],
+                output_options["coord_coordinate_file"],
+                defocus,
+                output_options["imod_circle_radius"],
+                output_options["imod_circle_thickness"],
+                output_options["imod_circle_color"][i],
+            )
+            # Track the number of saved particles for this structure
+            num_particles_saved_per_structure.append(
+                len(structure_particle_locations_with_orientations)
+            )
 
     return (
         blended_image,
@@ -5048,6 +5083,7 @@ def add_images(
         output_dir, f"{base_filename}_{structure_names_combined}"
     )
     output_options["output_file_path"] = output_file_path
+    print(output_file_path)
 
     # Blend the images and filter coordinates, then save the output
     result_image, filtered_particle_locations, num_particles_saved_per_structure = (
@@ -5815,7 +5851,7 @@ def process_single_micrograph_with_projections(
         "flip_y": args.flip_y,
         "json_scale": args.json_scale,
         "polygon_expansion_distance": args.polygon_expansion_distance,
-        "carbon": False,
+        "carbon": True,
     }
 
     # Use the structure_set_name for output paths to ensure consistency with generate_micrographs
