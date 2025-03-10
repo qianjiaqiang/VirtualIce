@@ -28,6 +28,7 @@ def rotate_z_sample(n, var=10):
     alpha = np.round(np.random.uniform(0, 360, n), 3)
     beta = np.round(np.random.normal(0, var / 2, n), 3)
     beta += np.round(np.random.choice([0,180], n, replace=True), 3)
+    beta = np.round(beta,3)
     gamma = np.round(np.random.uniform(0, 360, n), 3)
     return np.array([alpha, beta, gamma]).T
 
@@ -45,6 +46,8 @@ def rotate_xy_plane(n, var=10):
     #gamma = np.round(np.random.normal(0, var / 2, n), 3)
     beta  = np.round(np.random.choice([-90.0,90.0], n, replace=True), 3)
     beta += np.round(np.random.normal(0, var / 2, n), 3)
+    beta = np.round(beta,3)
+    test = 0
 
     gamma = np.round(np.random.uniform(0, 360, n), 3)
     #gamma  = np.round(np.random.choice([0.0], n, replace=True), 3)

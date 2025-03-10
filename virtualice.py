@@ -1702,6 +1702,10 @@ def process_structure_input(
     print_and_log("", logging.DEBUG)
 
     def process_local_mrc_file(file_path):
+        """
+        bug found in convert,
+        only used to calculate size of scaled volume
+        """
         converted_file = normalize_and_convert_mrc(file_path)
         # threshold_mrc_file(f"{converted_file}.mrc", std_devs_above_mean)
         scale_mrc_file(f"{converted_file}.mrc", pixelsize)
@@ -3178,7 +3182,7 @@ def trim_vol_determine_particle_numbers(
 
     # Compute the size of the largest possible equilateral cube
     min_cube_size = np.max(max_indices - min_indices)
-    print("min_cube_size:", min_cube_size)
+    # print("min_cube_size:", min_cube_size)
 
     # Increase the cube size by the scale_percent
     cube_size = int(np.ceil(min_cube_size * (100 + scale_percent) / 100))
@@ -3752,7 +3756,7 @@ def generate_projection(angle, volume_data):
 
     # Project the rotated volume by summing along the z-axis
     projection = np.sum(rotated_volume, axis=2)
-    print_and_log(projection.shape)
+    # print_and_log(projection.shape)
 
     # Pad the projection back to the original shape
     original_shape = volume_data.shape[:2]
@@ -4710,7 +4714,10 @@ def blend_images(
                 )
 
                 if filtered_carbon_particle_locations:
-                    print("filtered_carbon_particle_locations:",filtered_carbon_particle_locations)
+                    print(
+                        "filtered_carbon_particle_locations:",
+                        filtered_carbon_particle_locations,
+                    )
 
                 filtered_all_carbon_particle_locations.append(
                     filtered_carbon_particle_locations
@@ -4804,7 +4811,7 @@ def blend_images(
         final_carbon_particle_locations = edge_particle_filtering(
             filtered_all_carbon_particle_locations
         )
-        print("final_carbon_particle_locations:",final_carbon_particle_locations)
+        print("final_carbon_particle_locations:", final_carbon_particle_locations)
     # for i, filtered_particle_locations in enumerate(filtered_all_particle_locations):
     #    remaining_particle_locations = filtered_particle_locations[:]
     #    structure_name = structure_names[i]
@@ -4897,7 +4904,10 @@ def blend_images(
         final_filtered_carbon_particle_locations = overlapping_particle_filtering(
             final_carbon_particle_locations
         )
-        print("final_filtered_carbon_particle_locations:", final_filtered_carbon_particle_locations)
+        print(
+            "final_filtered_carbon_particle_locations:",
+            final_filtered_carbon_particle_locations,
+        )
     # for i, particle_locations in enumerate(final_particle_locations):
     #    if not particle_and_micrograph_generation_options["save_overlapping_coords"]:
     #        half_small_image_width = input_options["half_small_image_widths"][i]
@@ -5014,9 +5024,9 @@ def blend_images(
                 output_options["imod_circle_color"][i],
             )
             # Track the number of saved particles for this structure
-            num_particles_saved_per_structure.append(
-                len(structure_particle_locations_with_orientations)
-            )
+            #num_particles_saved_per_structure.append(
+            #    len(structure_particle_locations_with_orientations)
+            #)
 
     return (
         blended_image,
@@ -5541,16 +5551,19 @@ def prepare_single_micrograph_relion(args, structures):
         read_in_pixelSize = relion_projections.header["cella"]["x"] / np.float32(
             relion_projections.header["nx"]
         )
-        print("pixelSize:", read_in_pixelSize)
-        print("structure:", structure.shape)
+        # print("pixelSize:", read_in_pixelSize)
+        # print("structure:", structure.shape)
         import torch
         import torchvision.transforms.v2 as v2
-
         tr = v2.Resize((structure.shape[0], structure.shape[0]))
         relion_projections_star = fileparser.getparticles(
             "../" + structure_name + ".star"
         )
         particles = torch.tensor(relion_projections.data)
+        # TODO do zscore noralize on particles
+        for p in range(0,particles.shape[0]):
+            particles[p] = (particles[p] - particles[p].mean())/(particles[p].std())
+
         particles = tr(particles)
         particles = particles.numpy()
         print(particles.shape)
@@ -5721,10 +5734,12 @@ def process_single_micrograph_with_projections(
         num_particles_per_structure.append(num_particles)
         # Store half the width of the small image for each structure (used in generating locations)
         half_small_image_widths.append(structure.shape[0] // 2)
-        print("structure.shape[0]//2:", structure.shape[0] // 2)
+        # FIXME remove this comment
+        # print("structure.shape[0]//2:", structure.shape[0] // 2)
     # Step 2: Generate particle locations for all structures using round-robin placement
     # FIXME image size
-    print("num_particles_per_structure:", num_particles_per_structure)
+    # FIXME remove this comment
+    # print("num_particles_per_structure:", num_particles_per_structure)
     particle_locations, prob_map = generate_particle_locations(
         micrograph_image=micrograph,
         image_size=micrograph.shape,
@@ -6093,7 +6108,7 @@ def process_single_micrograph(
         )
         noisy_particles_CTF = apply_ctfs_with_eman2(
             noisy_particles,
-            [defocus] * len(noisy_particles),
+            [defocus*1.0] * len(noisy_particles),
             args.ampcont,
             args.bfactor,
             args.apix,
@@ -6235,7 +6250,8 @@ def process_single_structure(sub_structure_input, args):
                 structure = read_mrc(f"{structure_name}.mrc")
             print_and_log(f"[{structure_name}] Estimated mass of MRC: {mass} kDa")
             ice_scaling_fudge_factor = 2.9
-        print("sturcture.shape:", structure.shape)
+        # FIXME remove this comment
+        # print("sturcture.shape:", structure.shape)
         return structure_name, structure, mass, ice_scaling_fudge_factor
     return None
 
@@ -6484,6 +6500,11 @@ def clean_up(args, structure_set_name, structure_names):
         if os.path.exists(star_file):
             print_and_log(f"Moving {star_file} to {structure_set_name}/", logging.DEBUG)
             shutil.move(star_file, structure_set_name)
+
+        # Move _carbon.star files to the structure set directory
+        if os.path.exists(f"{structure_name}_carbon.star"):
+            print_and_log(f"Moving {structure_name}_carbon.star to {structure_set_name}/", logging.DEBUG)
+            shutil.move(f"{structure_name}_carbon.star", structure_set_name)
 
         if args.binning > 1:
             bin_dir = f"{structure_set_name}/bin_{args.binning}/"
