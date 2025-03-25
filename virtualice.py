@@ -527,7 +527,7 @@ def parse_arguments(script_start_time):
         "-st",
         "--std_threshold",
         type=float,
-        default=-1.0,
+        default=0.0,
         help="Threshold for removing noise from a downloaded/imported .mrc/.map file in terms of standard deviations above the mean. The idea is to not have dust around the 3D volume from the beginning. Default is %(default)s",
     )
     particle_micrograph_group.add_argument(
@@ -1707,9 +1707,9 @@ def process_structure_input(
         only used to calculate size of scaled volume
         """
         converted_file = normalize_and_convert_mrc(file_path)
-        # threshold_mrc_file(f"{converted_file}.mrc", std_devs_above_mean)
+        threshold_mrc_file(f"{converted_file}.mrc", std_devs_above_mean)
         scale_mrc_file(f"{converted_file}.mrc", pixelsize)
-        # converted_file = normalize_and_convert_mrc(f"{converted_file}.mrc")
+        converted_file = normalize_and_convert_mrc(f"{converted_file}.mrc")
         return (converted_file, "mrc") if converted_file else None
 
     def download_random_pdb_structure():
@@ -2637,8 +2637,9 @@ def extend_and_shuffle_image_list(num_images, image_list_file):
         image_list = [line.strip() for line in f.readlines() if line.strip()]
 
     if num_images <= len(image_list):
+        # FIXME not shuffle for debug
         # Shuffle the order of images randomly
-        random.shuffle(image_list)
+        # random.shuffle(image_list)
         # Select the desired number of images from the shuffled list and sort alphanumerically
         selected_images = sorted(image_list[:num_images])
     else:
@@ -3216,7 +3217,7 @@ def trim_vol_determine_particle_numbers(
     print("num_particle_layers:", num_particle_layers)
     # max_num_particles_without_overlap = int(2 * input_micrograph.shape[0] * input_micrograph.shape[1] / (trimmed_mrc_array.shape[0] * trimmed_mrc_array.shape[1]) / (scale_percent/100))
     max_num_particles_without_overlap = int(
-        1
+        2
         * input_micrograph.shape[0]
         * input_micrograph.shape[1]
         / (trimmed_mrc_array.shape[0] * trimmed_mrc_array.shape[1])
@@ -4153,7 +4154,7 @@ def generate_particle_locations(
                         tree = KDTree(placed_positions_list[s_idx])
                         distances, _ = tree.query([(x, y)], k=1)
                         min_distance = (
-                            half_small_image_widths[s_idx] * 2.0
+                            half_small_image_widths[s_idx] * 1.6
                         )  # Adjust the factor as needed
                         if distances[0] < min_distance:
                             continue  # Overlaps with existing particle of the same structure
@@ -4248,9 +4249,9 @@ def process_slices_gpu(args):
                     )  # Slight perturbation of the equation above
 
                 # Apply low-pass filter on the GPU
-                noisy_frame_gpu = lowPassFilter_gpu(
-                    noisy_frame_gpu, apix=apix, radius=lowpass
-                )
+                # noisy_frame_gpu = lowPassFilter_gpu(
+                #     noisy_frame_gpu, apix=apix, radius=lowpass
+                # )
 
             # Accumulate the noisy frame into the noisy slice
             noisy_slice_gpu[i, :, :] += noisy_frame_gpu
@@ -4560,6 +4561,9 @@ def create_collage(large_image, small_images, particle_locations, gaussian_varia
     collage = np.zeros(large_image.shape, dtype=large_image.dtype)
 
     for i, small_image in enumerate(small_images):
+        # FIXME change power of small_image
+        # Ps = np.sum(np.power(small_image,2))
+
         x, y = particle_locations[i]
         x_start = x - small_image.shape[1] // 2
         y_start = y - small_image.shape[0] // 2
@@ -4591,10 +4595,13 @@ def create_collage(large_image, small_images, particle_locations, gaussian_varia
 
         # Ensure dimensions match before addition
         collage_region = collage[y_start:y_end, x_start:x_end]
+        #print("y_start_trim:",y_start_trim)
+        #print("y_end_trim:",y_end_trim)
+        #print("small_image:", small_image.mean(),small_image.std(),small_image.min(),small_image.max())
         small_image_region = small_image[
             y_start_trim:y_end_trim, x_start_trim:x_end_trim
         ]
-
+        #print("collage_region.shape, small_image_region.shape:", collage_region.shape, small_image_region.shape)
         if collage_region.shape == small_image_region.shape:
             collage[y_start:y_end, x_start:x_end] += small_image_region
         else:
@@ -4936,11 +4943,15 @@ def blend_images(
             all_small_images[i] = all_small_images[i][: len(all_particle_locations[i])]
 
     # Step 5: Normalize the input micrograph to itself
+    # FIXME
+    # = large_image.std()
     large_image[:, :] = (large_image[:, :] - large_image[:, :].mean()) / large_image[
         :, :
     ].std()
 
     # Step 6: Create the collage of particles on the micrograph for all structures
+    # FIXME
+    print("simulation_options scale:",simulation_options["scale"])
     for i in range(len(all_small_images)):
         collage = create_collage(
             large_image,
@@ -4949,16 +4960,21 @@ def blend_images(
             particle_and_micrograph_generation_options["gaussian_variance"],
         )
 
+        # FIXME
         # If a probability map is provided, adjust the collage based on local ice thickness
         if "prob_map" in input_options and input_options["prob_map"] is not None:
             collage *= simulation_options["scale"] * input_options["prob_map"]
+            print("prob_map")
         else:
+            print("not prob_map")
             collage *= simulation_options["scale"]
 
         # Blend the collage with the large image
         large_image = large_image + collage
 
     # Step 7: Normalize the resulting micrograph to itself
+    # large_image = large_image * large_image.std() + large_image.mean()
+    # blended_image = large_image
     blended_image = (large_image - large_image.mean()) / large_image.std()
 
     # Step 8: Combine filtered_particle_locations with orientations for easier passing
@@ -5024,9 +5040,9 @@ def blend_images(
                 output_options["imod_circle_color"][i],
             )
             # Track the number of saved particles for this structure
-            #num_particles_saved_per_structure.append(
+            # num_particles_saved_per_structure.append(
             #    len(structure_particle_locations_with_orientations)
-            #)
+            # )
 
     return (
         blended_image,
@@ -5074,6 +5090,8 @@ def add_images(
 
     # Ensure that we have enough small images and particle locations for all structures
     total_particles = sum([len(p) for p in all_small_images])
+    # FIXME
+    print("total_particles", total_particles)
 
     # Initialize the probability map (if micrograph distribution is used)
     prob_map = input_options.get("prob_map", None)
@@ -5555,15 +5573,19 @@ def prepare_single_micrograph_relion(args, structures):
         # print("structure:", structure.shape)
         import torch
         import torchvision.transforms.v2 as v2
+        from torchvision.utils import save_image
+        
+        
         tr = v2.Resize((structure.shape[0], structure.shape[0]))
         relion_projections_star = fileparser.getparticles(
             "../" + structure_name + ".star"
         )
         particles = torch.tensor(relion_projections.data)
+        # particles = - 1.0 * particles
         # TODO do zscore noralize on particles
-        for p in range(0,particles.shape[0]):
-            particles[p] = (particles[p] - particles[p].mean())/(particles[p].std())
-
+        # for p in range(0, particles.shape[0]):
+        #     particles[p] = (particles[p] - particles[p].mean()) / (particles[p].std())
+        # print("after read and zscore ,particles[0].std()",particles[0].std())
         particles = tr(particles)
         particles = particles.numpy()
         print(particles.shape)
@@ -5590,7 +5612,7 @@ def prepare_single_micrograph_relion(args, structures):
         print_and_log(
             f" Simulating pixel-level Poisson noise{f' and dose damage' if args.dose_damage != 'None' else ''} across {args.num_simulated_particle_frames} particle frame{'s' if args.num_simulated_particle_frames != 1 else ''} for {structure_name}..."
         )
-        args.use_gpu = 0
+        # args.use_gpu = 1
         if args.use_gpu == 0:
             noisy_particles = add_poisson_noise_gpu(
                 particles,
@@ -5617,6 +5639,9 @@ def prepare_single_micrograph_relion(args, structures):
         all_structure_particles_orientations.append(orientations)
         all_structure_particles_noisy.append(noisy_particles)
 
+        #FIXME save noisy_particles
+        save_image(torch.tensor(noisy_particles[0]).unsqueeze(0),"nosiy_projections.png",normalize=True)
+    
     print_and_log("Projections and noisy for structures have been prepared!")
     return (
         all_structure_particles,
@@ -5640,6 +5665,7 @@ def process_single_micrograph_with_projections(
     projected_noisy,
 ):
     """
+    Added by Jiaqiang Qian
     Process a single micrograph for a set of structures.
 
     :param Namespace args: The argument namespace containing all the user-specified command-line arguments.
@@ -6108,7 +6134,7 @@ def process_single_micrograph(
         )
         noisy_particles_CTF = apply_ctfs_with_eman2(
             noisy_particles,
-            [defocus*1.0] * len(noisy_particles),
+            [defocus * 1.0] * len(noisy_particles),
             args.ampcont,
             args.bfactor,
             args.apix,
@@ -6250,6 +6276,7 @@ def process_single_structure(sub_structure_input, args):
                 structure = read_mrc(f"{structure_name}.mrc")
             print_and_log(f"[{structure_name}] Estimated mass of MRC: {mass} kDa")
             ice_scaling_fudge_factor = 2.9
+            ice_scaling_fudge_factor = 3.5
         # FIXME remove this comment
         # print("sturcture.shape:", structure.shape)
         return structure_name, structure, mass, ice_scaling_fudge_factor
@@ -6359,10 +6386,16 @@ def generate_micrographs(
     structure_particles_saved = {structure[0]: 0 for structure in structures}
 
     # Added by Jiaqiang Qian, generated particles and projections before
-    # projected_particles, projected_orientations, projected_noisy = prepare_single_micrograph(args, structures)
+    # use projections from virtualIce
+    # projected_particles, projected_orientations, projected_noisy = (
+    #     prepare_single_micrograph(args, structures)
+    # )
+
+    # use projections from relion
     projected_particles, projected_orientations, projected_noisy = (
         prepare_single_micrograph_relion(args, structures)
     )
+    print("projected_noisy[0]", projected_noisy[0].shape, projected_noisy[0][0].shape,projected_noisy[0][0].max())
     # Main loop for generating micrographs
     if args.parallelize_micrographs > 1:
         # Parallel micrograph generation using ProcessPoolExecutor
@@ -6503,7 +6536,10 @@ def clean_up(args, structure_set_name, structure_names):
 
         # Move _carbon.star files to the structure set directory
         if os.path.exists(f"{structure_name}_carbon.star"):
-            print_and_log(f"Moving {structure_name}_carbon.star to {structure_set_name}/", logging.DEBUG)
+            print_and_log(
+                f"Moving {structure_name}_carbon.star to {structure_set_name}/",
+                logging.DEBUG,
+            )
             shutil.move(f"{structure_name}_carbon.star", structure_set_name)
 
         if args.binning > 1:

@@ -93,16 +93,16 @@ def write_rotate_star(particle, star_file_path):
     fileparser.writestar(relion_star_data, relion_star_metadata, star_file_path)
 
 
-def run_mem(N):
+def run_mem(N ,p1=0.4, p2=0.4, p3=0.2):
     "rotate z 40%; rotate xy plane 40%; random 20%"
 
-    particle_z = rotate_z_sample(np.int32(N * 0.4))
-    particle_xy = rotate_xy_plane(np.int32(N * 0.4))
-    particle_uni = uniform_sample(np.int32(N - N* 0.8))
+    particle_z = rotate_z_sample(np.int32(N * p1))
+    particle_xy = rotate_xy_plane(np.int32(N * p2))
+    particle_uni = uniform_sample(np.int32(N * p3))
 
     particle = np.concatenate((particle_z, particle_xy, particle_uni), axis=0)
 
-    write_rotate_star(particle, "rotate_mem.star")
+    write_rotate_star(particle, "rotate_64.star")
 
 def run_protein(N):
     particle_uni = uniform_sample(N)
